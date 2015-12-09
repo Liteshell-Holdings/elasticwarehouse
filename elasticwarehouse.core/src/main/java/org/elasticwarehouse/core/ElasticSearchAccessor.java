@@ -20,13 +20,13 @@
 package org.elasticwarehouse.core;
 
 import static org.elasticsearch.node.NodeBuilder.*;
-import static org.elasticsearch.index.query.FilterBuilders.*;
 import static org.elasticsearch.index.query.QueryBuilders.*;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.net.InetSocketAddress;
 import java.text.DateFormat;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
@@ -67,30 +67,23 @@ import org.elasticsearch.action.admin.indices.stats.IndicesStatsResponse;
 import org.elasticsearch.action.admin.indices.template.put.PutIndexTemplateRequestBuilder;
 import org.elasticsearch.action.admin.indices.template.put.PutIndexTemplateResponse;
 import org.elasticsearch.action.bulk.BulkItemResponse;
-import org.elasticsearch.action.bulk.BulkProcessor;
 import org.elasticsearch.action.bulk.BulkRequestBuilder;
 import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.delete.DeleteResponse;
-import org.elasticsearch.action.deletebyquery.DeleteByQueryResponse;
-import org.elasticsearch.action.get.GetRequestBuilder;
 import org.elasticsearch.action.get.GetResponse;
 import org.elasticsearch.action.index.IndexResponse;
 import org.elasticsearch.action.search.SearchRequestBuilder;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.search.SearchType;
-import org.elasticsearch.action.support.IndicesOptions;
 import org.elasticsearch.action.update.UpdateRequestBuilder;
 import org.elasticsearch.action.update.UpdateResponse;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.client.Requests;
 import org.elasticsearch.client.transport.TransportClient;
-import org.elasticsearch.cluster.metadata.IndexMetaData;
-import org.elasticsearch.cluster.metadata.MetaData;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.common.io.stream.OutputStreamStreamOutput;
-import org.elasticsearch.common.settings.ImmutableSettings;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.InetSocketTransportAddress;
 import org.elasticsearch.common.transport.TransportAddress;
@@ -156,7 +149,7 @@ public class ElasticSearchAccessor
 		client_ = client;
 		myNodeName_ = conf_.getNodeName();// NetworkTools.getHostName().toUpperCase();
 		embedded_ = conf_.getWarehouseBoolValue(ElasticWarehouseConf.MODEEMBEDDED, true);
-		
+		/*
 		Runtime.getRuntime().addShutdownHook(new Thread() {
             @Override
             public void run() {
@@ -165,13 +158,12 @@ public class ElasticSearchAccessor
             		client_.close();
             	if( node_ != null )
             	{
-            		node_.stop();
             		node_.close();
             	}
             	LOGGER.info("Client stopped");
             }
         });
-		
+		*/
 		if( embedded_ )
 			hostPort_ = determineNodeRestPoint();
 		
@@ -183,7 +175,6 @@ public class ElasticSearchAccessor
 		client_ = null;
 		if( node_ != null )
 		{
-			node_.stop();
 			node_.close();
 		}
 	}
@@ -512,11 +503,12 @@ public class ElasticSearchAccessor
 	
 	public synchronized void deleteChildren(String id)
 	{
-		DeleteByQueryResponse deleteResponse = client_.prepareDeleteByQuery(conf_.getWarehouseValue(ElasticWarehouseConf.ES_INDEX_STORAGE_NAME) /*ElasticWarehouseConf.defaultIndexName_*/)
-				.setTypes(conf_.getWarehouseValue(ElasticWarehouseConf.ES_INDEX_STORAGE_CHILDTYPE) /*ElasticWarehouseConf.defaultChildsTypeName_*/)
+		/*DeleteByQueryResponse deleteResponse =new DeleteByQueryRequestBuilder(client_,DeleteByQueryAction.INSTANCE)
+				.setIndices(conf_.getWarehouseValue(ElasticWarehouseConf.ES_INDEX_STORAGE_NAME)  ElasticWarehouseConf.defaultIndexName_)
+				.setTypes(conf_.getWarehouseValue(ElasticWarehouseConf.ES_INDEX_STORAGE_CHILDTYPE) ElasticWarehouseConf.defaultChildsTypeName_)
 		        .setQuery(termQuery("parentId", id))
 		        .execute()
-		        .actionGet();		
+		        .actionGet();*/		
 	}
 	
 	public synchronized void deleteFile(String id)
@@ -542,7 +534,7 @@ public class ElasticSearchAccessor
 		String clusterName = conf_.getWarehouseConfiguration().get(ElasticWarehouseConf.ESCLUSTER);
 		String hosts = conf_.getWarehouseConfiguration().get(ElasticWarehouseConf.ESTRANSPORTHOSTS);		
 		
-		TransportClient client = new TransportClient();
+		TransportClient client = TransportClient.builder().build();
 		if( hosts.length() > 0 )
 		{
 			String[] hostsArray = hosts.split(",");
@@ -552,11 +544,11 @@ public class ElasticSearchAccessor
 				if( host.contains(":") )
 				{
 					String[] parts = host.split(":");
-					client.addTransportAddress(new InetSocketTransportAddress(parts[0], Integer.parseInt(parts[1]) ) );
+					client.addTransportAddress(new InetSocketTransportAddress(new InetSocketAddress(parts[0], Integer.parseInt(parts[1]) )) );
 					if( hostPort_.length() == 0 )
 						hostPort_ = parts[0]+":9200";
 				}else{
-					client.addTransportAddress(new InetSocketTransportAddress(host, 9300 ) );
+					client.addTransportAddress(new InetSocketTransportAddress(new InetSocketAddress(host, 9300 )) );
 					if( hostPort_.length() == 0 )
 						hostPort_ = host+":9200";
 				}
@@ -564,7 +556,7 @@ public class ElasticSearchAccessor
 		}
 		/*if( clusterName.length() > 0 )
 		{
-			Settings settings = ImmutableSettings.settingsBuilder()
+			Settings settings = Settings.settingsBuilder()
 			        .put("cluster.name", clusterName)
 			        .put("client.transport.sniff", true).build();
 			client =  new TransportClient(settings);
@@ -615,7 +607,7 @@ public class ElasticSearchAccessor
 				// doesn't matter			
 				} 
 	    }else{ */
-	      	settings = org.elasticsearch.common.settings.ImmutableSettings.settingsBuilder()
+	      	settings = Settings.settingsBuilder()
 						.put(c)
 						.build();
 	    //}		
@@ -758,16 +750,19 @@ public class ElasticSearchAccessor
 			int level = fdlr.getFolderLevel();
 			if( level > 0 )	//cannot delete root "/"
 			{
-				DeleteByQueryResponse deleteResponse = client_.prepareDeleteByQuery(conf_.getWarehouseValue(ElasticWarehouseConf.ES_INDEX_STORAGE_NAME) /*ElasticWarehouseConf.defaultIndexName_*/)
-					//.setTypes(ElasticWarehouseConf.defaultTypeName_)
-			        .setQuery( 
-			        		QueryBuilders.boolQuery()
-			        			//.must( QueryBuilders.rangeQuery("folderlevel").gte(level) )
-			        			//.must( QueryBuilders.termQuery("folderna", folder) )
-			        			.must( QueryBuilders.prefixQuery("folderna", folder) )
-			        			)
-			        .execute()
-			        .actionGet();
+//				DeleteByQueryResponse deleteResponse = new DeleteByQueryRequestBuilder(client_,DeleteByQueryAction.INSTANCE)
+//						.setIndices(conf_.getWarehouseValue(ElasticWarehouseConf.ES_INDEX_STORAGE_NAME) /*ElasticWarehouseConf.defaultIndexName_*/)
+//						
+//				//DeleteByQueryResponse deleteResponse = client_.prepareDeleteByQuery(conf_.getWarehouseValue(ElasticWarehouseConf.ES_INDEX_STORAGE_NAME) /*ElasticWarehouseConf.defaultIndexName_*/)
+//					//.setTypes(ElasticWarehouseConf.defaultTypeName_)
+//			        .setQuery( 
+//			        		QueryBuilders.boolQuery()
+//			        			//.must( QueryBuilders.rangeQuery("folderlevel").gte(level) )
+//			        			//.must( QueryBuilders.termQuery("folderna", folder) )
+//			        			.must( QueryBuilders.prefixQuery("folderna", folder) )
+//			        			)
+//			        .execute()
+//			        .actionGet();
 				
 				refreshIndex();
 				
@@ -960,9 +955,9 @@ public class ElasticSearchAccessor
             //NodeInfo info = nodesInfo.getNodesMap().get(node.id());
             NodeStats stats = nodesStats.getNodesMap().get(node.id());
             
-            short heapusedpercent = (stats == null ? -1 : stats.getJvm().getMem().getHeapUsedPrecent());
-            double loadvg = (stats == null ? -1.0 : stats.getOs() == null ? -1.0 : stats.getOs().getLoadAverage().length < 1 ? -1.0 : stats.getOs().getLoadAverage()[0] );
-            short memusedpercent = (stats == null ? -1 : stats.getOs().mem() == null ? -1 : stats.getOs().mem().usedPercent());
+            short heapusedpercent = (stats == null ? -1 : stats.getJvm().getMem().getHeapUsedPercent());
+            double loadvg = (stats == null ? -1.0 : stats.getOs() == null ? -1.0 : stats.getOs().getLoadAverage() < 1 ? -1.0 : stats.getOs().getLoadAverage() );
+            short memusedpercent = (stats == null ? -1 : stats.getOs().getMem() == null ? -1 : stats.getOs().getMem().getUsedPercent());
             String nodename = node.name();
             
             if( assignedNodes == null || assignedNodes.isEmpty() || assignedNodes.contains(nodename) )
@@ -984,8 +979,8 @@ public class ElasticSearchAccessor
          clusterStateRequest.clear().indices(indices).metaData(true);
          final ClusterStateResponse clusterStateResponse = client_.admin().cluster().state(clusterStateRequest).actionGet();
          
-         final String[] concreteIndices = clusterStateResponse.getState().metaData().concreteIndices(IndicesOptions.fromOptions(false, true, true, true), indices);
-         final String[] openIndices = clusterStateResponse.getState().metaData().concreteIndices(IndicesOptions.lenientExpandOpen(), indices);
+         final String[] concreteIndices = clusterStateResponse.getState().metaData().getConcreteAllIndices();
+         final String[] openIndices = clusterStateResponse.getState().metaData().getConcreteAllOpenIndices();
          ClusterHealthRequest clusterHealthRequest = Requests.clusterHealthRequest(openIndices);
          final ClusterHealthResponse clusterHealthResponse = client_.admin().cluster().health(clusterHealthRequest).actionGet();
          
